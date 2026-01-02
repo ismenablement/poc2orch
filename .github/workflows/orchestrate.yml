@@ -1,0 +1,13 @@
+name: Orchestrate
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to build (e.g., main)'
+        required: true
+        type: string
+
+jobs:
+  build-repoA:
+    uses: e1083457/poc2repoA/.github/workflows/build.yml@main
