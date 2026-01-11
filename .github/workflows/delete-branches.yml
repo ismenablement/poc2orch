@@ -20,6 +20,7 @@ jobs:
       with:
         app-id: ${{ secrets.APP_ID }}
         private-key: ${{ secrets.PRIVATE_KEY }}
+        repositories: poc2repoA,poc2repoB,poc2repoC
     - name: Delete branches in all repos
       run: |
         repos=("ismenablement/poc2repoA" "ismenablement/poc2repoB" "ismenablement/poc2repoC")
