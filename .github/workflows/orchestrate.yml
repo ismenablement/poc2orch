@@ -10,4 +10,4 @@ on:
 
 jobs:
   build-repoA:
-    uses: amisovic/poc2repoA/.github/workflows/build.yml@main
+    uses: ismenenablement/poc2repoA/.github/workflows/build.yml@main
