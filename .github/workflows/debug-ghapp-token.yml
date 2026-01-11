@@ -180,7 +180,8 @@ jobs:
           
           echo "   Summary: $accessible_count workflows accessible, $dispatchable_count dispatchable"
           if [ "$dispatchable_count" -gt 0 ]; then
-            echo "   ✅ Token can access and potentially trigger workflows"
+            echo "   ✅ Token can access workflows and they have dispatch triggers"
+            echo "   ⚠️  Note: This does NOT guarantee dispatch permission (requires Actions: Write)"
           else
             echo "   ⚠️  No dispatchable workflows found or token lacks access"
           fi
@@ -193,16 +194,19 @@ jobs:
         echo "Attempting to trigger build.yml on ${{ inputs.repo }}..."
         
         # Try to dispatch the build workflow
+        set +e  # Don't exit on error
         dispatch_result=$(gh workflow run build.yml --repo ${{ inputs.repo }} --ref ${{ inputs.branch }} --field branch=${{ inputs.branch }} 2>&1)
         dispatch_exit_code=$?
+        set -e  # Restore exit on error
+        
+        echo "   Command output: $dispatch_result"
+        echo "   Exit code: $dispatch_exit_code"
         
         if [ $dispatch_exit_code -eq 0 ]; then
           echo "   ✅ Successfully triggered build.yml workflow"
-          echo "   Dispatch result: $dispatch_result"
         else
           echo "   ❌ Failed to trigger build.yml workflow"
-          echo "   Error: $dispatch_result"
-          echo "   Exit code: $dispatch_exit_code"
+          echo "   This indicates the GitHub App lacks Actions: Write permission"
         fi
       env:
         GH_TOKEN: ${{ steps.app-token.outputs.token }}
