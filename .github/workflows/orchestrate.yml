@@ -16,3 +16,13 @@ jobs:
     uses: ismenablement/poc2repoA/.github/workflows/build.yml@main
     with:
       branch: ${{ inputs.branch }}
+  build-repoB:
+    needs: build-repoA
+    uses: ismenablement/poc2repoB/.github/workflows/build.yml@main
+    with:
+      branch: ${{ inputs.branch }}
+  build-repoC:
+    needs: build-repoA
+    uses: ismenablement/poc2repoC/.github/workflows/build.yml@main
+    with:
+      branch: ${{ inputs.branch }}
