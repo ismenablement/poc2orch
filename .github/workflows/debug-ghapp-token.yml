@@ -1,0 +1,160 @@
+name: Debug GitHub App Token
+
+run-name: Debug GH App Token for ${{ inputs.repo }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: 'Repository to test (owner/repo format)'
+        required: true
+        type: string
+        default: 'ismenablement/poc2repoA'
+      branch:
+        description: 'Branch to test'
+        required: false
+        default: 'main'
+        type: string
+      run_id:
+        description: 'Run ID for testing'
+        required: false
+        type: string
+      workflow:
+        description: 'Workflow filename for dispatch test'
+        required: false
+        type: string
+
+jobs:
+  debug-token:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Generate GitHub App token
+      id: app-token
+      uses: actions/create-github-app-token@v1
+      with:
+        app-id: ${{ secrets.APP_ID }}
+        private-key: ${{ secrets.PRIVATE_KEY }}
+        repositories: poc2repoA,poc2repoB,poc2repoC
+    - name: Debug GitHub App token permissions
+      run: |
+        echo "Testing different API endpoints with the token..."
+        
+        # Test 1: Repository access
+        echo "1. Testing repository access..."
+        repo_response_code=$(curl -s -w "%{http_code}" -o /dev/null \
+          -H "Authorization: token ${{ steps.app-token.outputs.token }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          "https://api.github.com/repos/${{ inputs.repo }}")
+        
+        if [ "$repo_response_code" = "200" ]; then
+          echo "   ✅ Token has repository access"
+          # Get repo name
+          repo_info=$(curl -s -H "Authorization: token ${{ steps.app-token.outputs.token }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ inputs.repo }}")
+          repo_name=$(echo "$repo_info" | jq -r '.full_name // "unknown"')
+          echo "   Repository: $repo_name"
+        else
+          echo "   ❌ Token does NOT have repository access (HTTP $repo_response_code)"
+        fi
+        
+        # Test 2: Check if GitHub App has repository access (basic content access)
+        echo "2. Checking if GitHub App has repository content access..."
+        content_response=$(curl -s -w "%{http_code}" -o /dev/null \
+          -H "Authorization: token ${{ steps.app-token.outputs.token }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          "https://api.github.com/repos/${{ inputs.repo }}/contents/pom.xml")
+        
+        if [ "$content_response" = "200" ]; then
+          echo "   ✅ GitHub App has content access to ${{ inputs.repo }}"
+        else
+          echo "   ❌ GitHub App does NOT have content access to ${{ inputs.repo }} (HTTP $content_response)"
+        fi
+        
+        # Test 3: Test other permissions (only if repository access works)
+        echo "3. Testing other permissions..."
+        
+        if [ "$repo_response_code" = "200" ]; then
+          echo "   Testing checks permission..."
+          # First try to get the default branch SHA
+          default_branch=$(curl -s -H "Authorization: token ${{ steps.app-token.outputs.token }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ inputs.repo }}" | jq -r '.default_branch // "main"')
+          
+          # Try to list check runs (may return 404 if no check runs exist)
+          checks_response=$(curl -s -w "%{http_code}" -o /dev/null \
+            -H "Authorization: token ${{ steps.app-token.outputs.token }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ inputs.repo }}/check-runs")
+          
+          if [ "$checks_response" = "200" ]; then
+            echo "   ✅ Token has checks permission (check runs accessible)"
+          elif [ "$checks_response" = "404" ]; then
+            echo "   ⚠️  Checks endpoint returns 404 (may mean no check runs exist, not lack of permission)"
+            # Try to create a check run to test write permission
+            check_create_response=$(curl -s -w "%{http_code}" -o /dev/null \
+              -X POST \
+              -H "Authorization: token ${{ steps.app-token.outputs.token }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              -H "Content-Type: application/json" \
+              -d '{"name":"test-check","head_sha":"dummy-sha","status":"completed"}' \
+              "https://api.github.com/repos/${{ inputs.repo }}/check-runs")
+            
+            if [ "$check_create_response" = "422" ] || [ "$check_create_response" = "201" ]; then
+              echo "   ✅ Token has checks write permission (can create check runs)"
+            else
+              echo "   ❌ Token lacks checks write permission (HTTP $check_create_response)"
+            fi
+          else
+            echo "   ❌ Token has unexpected response for checks (HTTP $checks_response)"
+          fi
+          
+          # Test pull requests permission
+          pr_response=$(curl -s -w "%{http_code}" -o /dev/null \
+            -H "Authorization: token ${{ steps.app-token.outputs.token }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ inputs.repo }}/pulls")
+          
+          if [ "$pr_response" = "200" ]; then
+            echo "   ✅ Token has pull requests permission"
+          else
+            echo "   ❌ Token lacks pull requests permission (HTTP $pr_response)"
+          fi
+        else
+          echo "   ⏭️  Skipping permission tests (no repository access)"
+        fi
+        
+        # Test 4: List workflows (should work if token has actions:read)
+        echo "4. Testing workflow list access..."
+        workflow_response=$(curl -s -H "Authorization: token ${{ steps.app-token.outputs.token }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          "https://api.github.com/repos/${{ inputs.repo }}/actions/workflows")
+        
+        if echo "$workflow_response" | grep -q '"workflows"'; then
+          echo "   ✅ Token can list workflows"
+          workflow_count=$(echo "$workflow_response" | jq -r '.workflows | length')
+          echo "   Found $workflow_count workflows"
+        else
+          echo "   ❌ Token cannot list workflows"
+          echo "   Response: $(echo "$workflow_response" | jq -r '.message // "unknown error"')"
+        fi
+        
+        # Test 5: Check token scopes/permissions for workflow dispatch
+        echo "5. Checking workflow dispatch permissions..."
+        if [ -n "${{ inputs.workflow }}" ]; then
+          dispatch_test=$(curl -s -w "%{http_code}" -o /dev/null \
+            -X POST \
+            -H "Authorization: token ${{ steps.app-token.outputs.token }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Content-Type: application/json" \
+            -d '{"ref":"${{ inputs.branch }}","inputs":{"orchestrator_runid":"${{ inputs.run_id }}"}}' \
+            "https://api.github.com/repos/${{ inputs.repo }}/actions/workflows/${{ inputs.workflow }}/dispatches")
+          
+          if [ "$dispatch_test" = "204" ]; then
+            echo "   ✅ Token can trigger workflows"
+          else
+            echo "   ❌ Token cannot trigger workflows (HTTP $dispatch_test)"
+          fi
+        else
+          echo "   ⏭️  Skipping workflow dispatch test (no workflow specified)"
+        fi
