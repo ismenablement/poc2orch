@@ -1,5 +1,7 @@
 name: Orchestrate
 
+run-name: ${{ format('Orchestrate - {0}', inputs.branch ) }}
+
 on:
   workflow_dispatch:
     inputs:
