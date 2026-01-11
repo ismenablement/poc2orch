@@ -15,10 +15,6 @@ on:
         required: false
         default: 'main'
         type: string
-      workflow:
-        description: 'Workflow filename for dispatch test'
-        required: false
-        type: string
 
 jobs:
   debug-token:
@@ -135,30 +131,58 @@ jobs:
           echo "   Response: $(echo "$workflow_response" | jq -r '.message // "unknown error"')"
         fi
         
-        # Test 5: Check token scopes/permissions for workflow dispatch
-        echo "5. Checking workflow dispatch permissions..."
-        if [ -n "${{ inputs.workflow }}" ]; then
-          dispatch_test=$(curl -s -w "%{http_code}" -o /dev/null \
-            -X POST \
-            -H "Authorization: token ${{ steps.app-token.outputs.token }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            -H "Content-Type: application/json" \
-            -d '{"ref":"${{ inputs.branch }}","inputs":{"branch":"${{ inputs.branch }}"}}' \
-            "https://api.github.com/repos/${{ inputs.repo }}/actions/workflows/${{ inputs.workflow }}/dispatches")
+        # Test 5: Check workflow accessibility and dispatch capability
+        echo "5. Checking workflow accessibility and dispatch capability..."
+        if echo "$workflow_response" | grep -q '"workflows"'; then
+          # Extract workflow information
+          workflows=$(echo "$workflow_response" | jq -r '.workflows[] | {name: .name, path: .path, state: .state} | @base64')
           
-          if [ "$dispatch_test" = "204" ]; then
-            echo "   ✅ Token can trigger workflows"
+          dispatchable_count=0
+          accessible_count=0
+          
+          echo "$workflows" | while IFS= read -r workflow_encoded; do
+            if [ -n "$workflow_encoded" ]; then
+              workflow_data=$(echo "$workflow_encoded" | base64 -d)
+              workflow_name=$(echo "$workflow_data" | jq -r '.name')
+              workflow_path=$(echo "$workflow_data" | jq -r '.path')
+              workflow_state=$(echo "$workflow_data" | jq -r '.state')
+              
+              echo "   Checking workflow: $workflow_name ($workflow_path)"
+              
+              # Try to access workflow content
+              content_response=$(curl -s -w "%{http_code}" -o /dev/null \
+                -H "Authorization: token ${{ steps.app-token.outputs.token }}" \
+                -H "Accept: application/vnd.github.v3+json" \
+                "https://api.github.com/repos/${{ inputs.repo }}/contents/$workflow_path?ref=${{ inputs.branch }}")
+              
+              if [ "$content_response" = "200" ]; then
+                echo "   ✅ Workflow accessible"
+                accessible_count=$((accessible_count + 1))
+                
+                # Get workflow content to check for workflow_dispatch
+                workflow_content=$(curl -s \
+                  -H "Authorization: token ${{ steps.app-token.outputs.token }}" \
+                  -H "Accept: application/vnd.github.v3+json" \
+                  "https://api.github.com/repos/${{ inputs.repo }}/contents/$workflow_path?ref=${{ inputs.branch }}" | jq -r '.content' | base64 -d)
+                
+                if echo "$workflow_content" | grep -q "workflow_dispatch"; then
+                  echo "   ✅ Workflow is dispatchable (has workflow_dispatch trigger)"
+                  dispatchable_count=$((dispatchable_count + 1))
+                else
+                  echo "   ⚠️  Workflow is not dispatchable (no workflow_dispatch trigger)"
+                fi
+              else
+                echo "   ❌ Workflow not accessible (HTTP $content_response)"
+              fi
+            fi
+          done
+          
+          echo "   Summary: $accessible_count workflows accessible, $dispatchable_count dispatchable"
+          if [ "$dispatchable_count" -gt 0 ]; then
+            echo "   ✅ Token can access and potentially trigger workflows"
           else
-            echo "   ❌ Token cannot trigger workflows (HTTP $dispatch_test)"
+            echo "   ⚠️  No dispatchable workflows found or token lacks access"
           fi
         else
-          echo "   ⏭️  Skipping workflow dispatch test (no workflow specified)"
+          echo "   ⏭️  Skipping workflow accessibility test (no workflows found)"
         fi
-    - name: Trigger workflow
-      if: inputs.workflow != ''
-      run: |
-        echo "Triggering ${{ inputs.workflow }} on ${{ inputs.repo }}..."
-        gh workflow run ${{ inputs.workflow }} --repo ${{ inputs.repo }} --ref ${{ inputs.branch }} --field branch=${{ inputs.branch }}
-        echo "Workflow dispatch sent."
-      env:
-        GH_TOKEN: ${{ steps.app-token.outputs.token }}
