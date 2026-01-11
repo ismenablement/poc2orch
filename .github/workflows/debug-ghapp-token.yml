@@ -164,3 +164,5 @@ jobs:
         echo "Triggering ${{ inputs.workflow }} on ${{ inputs.repo }}..."
         gh workflow run ${{ inputs.workflow }} --repo ${{ inputs.repo }} --ref ${{ inputs.branch }} --field orchestrator_runid=${{ inputs.run_id }}
         echo "Workflow dispatch sent."
+      env:
+        GH_TOKEN: ${{ steps.app-token.outputs.token }}
