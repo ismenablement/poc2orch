@@ -158,3 +158,9 @@ jobs:
         else
           echo "   ⏭️  Skipping workflow dispatch test (no workflow specified)"
         fi
+    - name: Trigger workflow and wait
+      if: inputs.workflow != ''
+      run: |
+        echo "Triggering ${{ inputs.workflow }} on ${{ inputs.repo }}..."
+        gh workflow run ${{ inputs.workflow }} --repo ${{ inputs.repo }} --ref ${{ inputs.branch }} --field orchestrator_runid=${{ inputs.run_id }}
+        echo "Workflow dispatch sent."
