@@ -21,6 +21,72 @@ jobs:
         app-id: ${{ secrets.APP_ID }}
         private-key: ${{ secrets.PRIVATE_KEY }}
         repositories: poc2repoA,poc2repoB,poc2repoC
+    - name: Debug GitHub App token permissions
+      run: |
+        echo "Testing GitHub App token permissions on poc2repoA..."
+        
+        # Test 1: Repository access
+        echo "1. Testing repository access..."
+        repo_response_code=$(curl -s -w "%{http_code}" -o /dev/null \
+          -H "Authorization: token ${{ steps.app-token.outputs.token }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          "https://api.github.com/repos/ismenablement/poc2repoA")
+        
+        if [ "$repo_response_code" = "200" ]; then
+          echo "   ✅ Token has repository access"
+          repo_info=$(curl -s -H "Authorization: token ${{ steps.app-token.outputs.token }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/ismenablement/poc2repoA")
+          repo_name=$(echo "$repo_info" | jq -r '.full_name // "unknown"')
+          echo "   Repository: $repo_name"
+        else
+          echo "   ❌ Token does NOT have repository access (HTTP $repo_response_code)"
+        fi
+        
+        # Test 2: Check content access (for branch operations)
+        echo "2. Checking content access..."
+        content_response=$(curl -s -w "%{http_code}" -o /dev/null \
+          -H "Authorization: token ${{ steps.app-token.outputs.token }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          "https://api.github.com/repos/ismenablement/poc2repoA/contents/README.md")
+        
+        if [ "$content_response" = "200" ]; then
+          echo "   ✅ Token has content read access"
+        else
+          echo "   ❌ Token does NOT have content read access (HTTP $content_response)"
+        fi
+        
+        # Test 3: Test branch creation permission (write access)
+        echo "3. Testing branch creation permission..."
+        main_sha=$(curl -s -H "Authorization: token ${{ steps.app-token.outputs.token }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          "https://api.github.com/repos/ismenablement/poc2repoA/git/refs/heads/main" | jq -r '.object.sha // "not-found"')
+        
+        if [ "$main_sha" != "not-found" ]; then
+          echo "   ✅ Can read main branch SHA: $main_sha"
+          # Test creating a test ref
+          test_ref_response=$(curl -s -w "%{http_code}" -o /dev/null \
+            -X POST \
+            -H "Authorization: token ${{ steps.app-token.outputs.token }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Content-Type: application/json" \
+            -d "{\"ref\":\"refs/heads/test-debug-branch\",\"sha\":\"$main_sha\"}" \
+            "https://api.github.com/repos/ismenablement/poc2repoA/git/refs")
+          
+          if [ "$test_ref_response" = "201" ]; then
+            echo "   ✅ Token can create branches (write access)"
+            # Clean up test branch
+            curl -s -X DELETE \
+              -H "Authorization: token ${{ steps.app-token.outputs.token }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/ismenablement/poc2repoA/git/refs/heads/test-debug-branch" > /dev/null
+            echo "   🧹 Cleaned up test branch"
+          else
+            echo "   ❌ Token cannot create branches (HTTP $test_ref_response)"
+          fi
+        else
+          echo "   ❌ Cannot read main branch SHA"
+        fi
     - name: Create branches in all repos
       run: |
         repos=("ismenablement/poc2repoA" "ismenablement/poc2repoB" "ismenablement/poc2repoC")
