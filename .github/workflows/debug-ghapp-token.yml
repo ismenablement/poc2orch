@@ -134,13 +134,14 @@ jobs:
         # Test 5: Check workflow accessibility and dispatch capability
         echo "5. Checking workflow accessibility and dispatch capability..."
         if echo "$workflow_response" | grep -q '"workflows"'; then
-          # Extract workflow information
+          # Extract workflow information and process in a way that preserves variables
           workflows=$(echo "$workflow_response" | jq -r '.workflows[] | {name: .name, path: .path, state: .state} | @base64')
           
           dispatchable_count=0
           accessible_count=0
           
-          echo "$workflows" | while IFS= read -r workflow_encoded; do
+          # Process each workflow
+          while IFS= read -r workflow_encoded; do
             if [ -n "$workflow_encoded" ]; then
               workflow_data=$(echo "$workflow_encoded" | base64 -d)
               workflow_name=$(echo "$workflow_data" | jq -r '.name')
@@ -175,7 +176,7 @@ jobs:
                 echo "   ❌ Workflow not accessible (HTTP $content_response)"
               fi
             fi
-          done
+          done <<< "$workflows"
           
           echo "   Summary: $accessible_count workflows accessible, $dispatchable_count dispatchable"
           if [ "$dispatchable_count" -gt 0 ]; then
@@ -186,3 +187,22 @@ jobs:
         else
           echo "   ⏭️  Skipping workflow accessibility test (no workflows found)"
         fi
+    - name: Test actual workflow dispatch
+      run: |
+        echo "Testing actual workflow dispatch capability..."
+        echo "Attempting to trigger build.yml on ${{ inputs.repo }}..."
+        
+        # Try to dispatch the build workflow
+        dispatch_result=$(gh workflow run build.yml --repo ${{ inputs.repo }} --ref ${{ inputs.branch }} --field branch=${{ inputs.branch }} 2>&1)
+        dispatch_exit_code=$?
+        
+        if [ $dispatch_exit_code -eq 0 ]; then
+          echo "   ✅ Successfully triggered build.yml workflow"
+          echo "   Dispatch result: $dispatch_result"
+        else
+          echo "   ❌ Failed to trigger build.yml workflow"
+          echo "   Error: $dispatch_result"
+          echo "   Exit code: $dispatch_exit_code"
+        fi
+      env:
+        GH_TOKEN: ${{ steps.app-token.outputs.token }}
